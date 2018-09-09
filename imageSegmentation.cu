@@ -28,6 +28,8 @@ __global__ void resetClustersValues(int *d_sumRed,int *d_sumGreen,int *d_sumBlue
 		  d_tempRedCentroid[threadID] = 0;
 		  d_tempGreenCentroid[threadID] = 0;
 		  d_tempBlueCentroid[threadID] = 0;
+
+		  
 	  }
 }
   
@@ -46,13 +48,14 @@ __global__ void setPixelsLabel(int *d_red, int *d_green, int *d_blue, int *d_lab
   
 	  // Global thread index
 	  int threadID = (threadIdx.x + blockIdx.x * blockDim.x) + (threadIdx.y + blockIdx.y * blockDim.y) * blockDim.x * gridDim.x;
-  
+	  //printf("d_red:  %d \n", d_red[threadID]);
 	  double distance_pixel, distance_ccCluster;
 	  int ccCluster = 0;
   
 	  distance_ccCluster = sqrtf(powf((d_red[threadID]-d_redCentroid[ccCluster]),2.0) + powf((d_green[threadID]-d_greenCentroid[ccCluster]),2.0) + powf((d_blue[threadID]-d_blueCentroid[ccCluster]),2.0));
   
 	  if(threadID < d_size) {
+		//printf("d_red:  %d \n", d_red[threadID]);
 		  for(int i = 0; i < d_nCentroids; ++i) {			
 			  distance_pixel = sqrtf(powf((d_red[threadID]-d_redCentroid[i]),2.0) + powf((d_green[threadID]-d_greenCentroid[i]),2.0) + powf((d_blue[threadID]-d_blueCentroid[i]),2.0));
   
@@ -109,7 +112,7 @@ void executeKernel(double threshold,
 	int* d_red, int* d_green, int* d_blue, int* h_labelArray, int* d_labelArray, size_t sizePixels, size_t sizeClusters, int d_size, int d_nCentroids)
 {
 	// Defining grid/block size
-	double centroidChange;    
+	double centroidChange = 10;    
     int threadsPerBlock_ = 16;
     int gridSize = 256;
 	int block_x, block_y;
@@ -125,28 +128,59 @@ void executeKernel(double threshold,
 
     printf("CUDA kernel launch with %d blocks of %d threads\n", gridSize, threadsPerBlock_);
     
+	printf("umbral:  %lf \n", threshold);
+	printf("d_size:  %d \n", d_size);
+	printf("d_nCentroids:  %d \n", d_nCentroids);
+
+	printf("**h_labelArray:  %d \n", h_labelArray[0]); 
+	printf("**h_labelArray:  %d \n", h_labelArray[1]); 
+	/*printf("red:  %d \n", *d_red);
+	
+	for(int i = 0; i < 5; ++i){
+        printf("red:  %d \n", d_red[i]);
+        printf("green:  %d \n", d_green[i]);
+        printf("blue:  %d \n", d_blue[i]);
+    }
+
+    for(int i = 0; i < d_nCentroids ; ++i){
+        printf("h_redCentroid:  %d \n", d_redCentroid[i]);
+        printf("h_greenCentroid:  %d \n", d_greenCentroid[i]);
+        printf("h_blueCentroid:  %d \n", d_blueCentroid[i]);                
+    }   
+*/
 	GpuTimer timer;
 	timer.Start();
     	
     do
     {
         //Se ccentroids as constant
-        CUDA_CALL(cudaMemcpyToSymbol(d_redCentroid, h_redCentroid, sizeClusters));
+        /*CUDA_CALL(cudaMemcpyToSymbol(d_redCentroid, h_redCentroid, sizeClusters));
 		CUDA_CALL(cudaMemcpyToSymbol(d_greenCentroid, h_greenCentroid, sizeClusters));
-		CUDA_CALL(cudaMemcpyToSymbol(d_blueCentroid, h_blueCentroid, sizeClusters));
+		CUDA_CALL(cudaMemcpyToSymbol(d_blueCentroid, h_blueCentroid, sizeClusters));*/
+
+		CUDA_CALL(cudaMemcpy(d_redCentroid, h_redCentroid, sizeClusters, cudaMemcpyHostToDevice));
+    	CUDA_CALL(cudaMemcpy(d_greenCentroid, h_greenCentroid, sizeClusters, cudaMemcpyHostToDevice));
+    	CUDA_CALL(cudaMemcpy(d_blueCentroid, h_blueCentroid, sizeClusters, cudaMemcpyHostToDevice));
 		
         //Reset values for new clusters
         resetClustersValues<<<1, dimBlock>>>(d_sumRed, d_sumGreen, d_sumBlue, d_pixelClusterCounter, d_tempRedCentroid, d_tempGreenCentroid, d_tempBlueCentroid, d_nCentroids);
-
+		
         //Reset labelArray
         resetLabelArray<<<dimGrid, dimBlock>>>(d_labelArray, d_size);
-
+	
         //Casify pixels and save value in labelArray
 		setPixelsLabel<<<dimGrid, dimBlock >>> (d_red, d_green, d_blue, d_labelArray, d_size, d_nCentroids, d_redCentroid, d_greenCentroid, d_blueCentroid);
-
+				
         //
         sumCluster<<<dimGrid, dimBlock>>> (d_red, d_green, d_blue, d_sumRed, d_sumGreen, d_sumBlue, d_labelArray, d_pixelClusterCounter, d_size);
+		
+		int *h_pixelClusterCounter = (int *)malloc(sizeClusters);
+		CUDA_CALL(cudaMemcpy(h_pixelClusterCounter, d_pixelClusterCounter, sizeClusters, cudaMemcpyDeviceToHost));
 
+		printf("h_sumRed:  %d \n", h_pixelClusterCounter[0]); 
+		printf("h_sumRed:  %d \n", h_pixelClusterCounter[1]);
+
+		//printf("CUDA kernel launch with %d blocks of %d threads\n", gridSize, threadsPerBlock_);
         //Finds new RGB Centroids' values
 		newCentroids<<<1,dimBlock>>>(d_tempRedCentroid, d_tempGreenCentroid, d_tempBlueCentroid, d_sumRed, d_sumGreen, d_sumBlue, d_pixelClusterCounter, d_nCentroids);
 
@@ -154,11 +188,20 @@ void executeKernel(double threshold,
 		CUDA_CALL(cudaMemcpy(h_greenCentroid, d_tempGreenCentroid, sizeClusters,cudaMemcpyDeviceToHost));
 		CUDA_CALL(cudaMemcpy(h_blueCentroid, d_tempBlueCentroid, sizeClusters, cudaMemcpyDeviceToHost));
 		
-        centroidChange = sqrtf(powf((d_redCentroid-h_redCentroid),2.0) + powf((d_greenCentroid-h_greenCentroid),2.0) + powf((d_blueCentroid-h_blueCentroid),2.0));
+		/*printf("h_redCentroid:  %d \n", h_redCentroid[0]); 
+		printf("h_redCentroid:  %d \n", h_redCentroid[1]); */
+
+        // centroidChange = sqrtf(powf((d_redCentroid-h_redCentroid),2.0) + powf((d_greenCentroid-h_greenCentroid),2.0) + powf((d_blueCentroid-h_blueCentroid),2.0));
+	    centroidChange--;
+		printf("centroidChange:  %f \n", centroidChange);
 		
     } while (centroidChange > threshold); 
+	
+	CUDA_CALL(cudaMemcpy(h_labelArray, d_labelArray, sizePixels, cudaMemcpyDeviceToHost));	
 
-	CUDA_CALL(cudaMemcpy(h_labelArray, d_labelArray, sizePixels, cudaMemcpyDeviceToHost));
+	/*printf("h_labelArray:  %d \n", h_labelArray[0]); 
+	printf("h_labelArray:  %d \n", h_labelArray[1]); 
+*/
 
 	timer.Stop();
 }
